@@ -207,7 +207,7 @@ sweeptext(int new, int tag)
 
 	if(getr(&r) && (t = malloc(sizeof(Text)))){
 		memset((void*)t, 0, sizeof(Text));
-		current((Flayer *)0);
+		//current((Flayer *)0);
 		flnew(&t->l[0], gettext, 0, (char *)t);
 		flinit(&t->l[0], r, font, maincols);	/*bnl*/
 		t->nwin = 1;

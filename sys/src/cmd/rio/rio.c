@@ -39,6 +39,7 @@ int		threadrforkflag = 0;	/* should be RFENVG but that hides rio from plumber */
 void	mousethread(void*);
 void	keyboardthread(void*);
 void	winclosethread(void*);
+void	themethread(void*);
 void	initcmd(void*);
 Channel* initkbd(void);
 
@@ -199,10 +200,10 @@ threadmain(int argc, char *argv[])
 	kbdchan = initkbd();
 	if(kbdchan == nil)
 		error("can't find keyboard");
-	wscreen = allocscreen(screen, background, 0);
+	wscreen = allocscreen(screen, col[Colrioback], 0);
 	if(wscreen == nil)
 		error("can't allocate screen");
-	draw(view, viewr, background, nil, ZP);
+	draw(view, viewr, col[Colrioback], nil, ZP);
 	flushimage(display, 1);
 
 	timerinit();
@@ -581,6 +582,48 @@ wtopcmp(void *a, void *b)
 }
 
 void
+redraw(void)
+{
+	Image *im;
+	int i, j;
+	Rectangle r;
+	Point o, n;
+	Window *w;
+
+	view = screen;
+	draw(view, view->r, col[Colrioback], nil, ZP);
+	o = subpt(viewr.max, viewr.min);
+	n = subpt(view->clipr.max, view->clipr.min);
+	qsort(window, nwindow, sizeof(window[0]), wtopcmp);
+	for(i=0; i<nwindow; i++){
+		w = window[i];
+		r = rectsubpt(w->i->r, viewr.min);
+		r.min.x = (r.min.x*n.x)/o.x;
+		r.min.y = (r.min.y*n.y)/o.y;
+		r.max.x = (r.max.x*n.x)/o.x;
+		r.max.y = (r.max.y*n.y)/o.y;
+		r = rectaddpt(r, view->clipr.min);
+		if(!goodrect(r))
+			r = rectsubpt(w->i->r, subpt(w->i->r.min, r.min));
+		for(j=0; j<nhidden; j++)
+			if(w == hidden[j])
+				break;
+		frinittick(w);
+		incref(w);
+		if(j < nhidden){
+			im = allocimage(display, r, screen->chan, 0, DNofill);
+			r = ZR;
+		} else
+			im = allocwindow(wscreen, r, Refbackup, DNofill);
+		if(im)
+			wsendctlmesg(w, Reshaped, r, im);
+		wclose(w);
+	}
+	viewr = view->r;
+	flushimage(display, 1);
+}
+
+void
 resized(void)
 {
 	Image *im;
@@ -594,10 +637,10 @@ resized(void)
 	freescrtemps();
 	view = screen;
 	freescreen(wscreen);
-	wscreen = allocscreen(screen, background, 0);
+	wscreen = allocscreen(screen, col[Colrioback], 0);
 	if(wscreen == nil)
 		error("can't re-allocate screen");
-	draw(view, view->r, background, nil, ZP);
+	draw(view, view->r, col[Colrioback], nil, ZP);
 	o = subpt(viewr.max, viewr.min);
 	n = subpt(view->clipr.max, view->clipr.min);
 	qsort(window, nwindow, sizeof(window[0]), wtopcmp);

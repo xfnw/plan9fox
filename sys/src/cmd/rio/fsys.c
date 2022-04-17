@@ -33,6 +33,7 @@ Dirtab dirtab[]=
 	{ "screen",		QTFILE,	Qscreen,		0400 },
 	{ "snarf",		QTFILE,	Qsnarf,		0600 },
 	{ "text",		QTFILE,	Qtext,		0600 },
+	{ "theme",		QTFILE, Qtheme,		0600 },
 	{ "wdir",		QTFILE,	Qwdir,		0600 },
 	{ "wctl",		QTFILE,	Qwctl,		0600 },
 	{ "window",	QTFILE,	Qwindow,		0400 },

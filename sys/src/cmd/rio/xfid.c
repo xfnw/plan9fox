@@ -502,6 +502,10 @@ xfidwrite(Xfid *x)
 		memmove(w->label, x->data, cnt);
 		break;
 
+	case Qtheme:
+		themeload(x->data, cnt);
+		break;
+
 	case Qmouse:
 		if(w!=input || Dx(w->screenr)<=0)
 			break;
@@ -744,6 +748,10 @@ xfidread(Xfid *x)
 
 	case Qtext:
 		t = wcontents(w, &n);
+		goto Text;
+
+	case Qtheme:
+		t = themestring(&n);
 		goto Text;
 
 	Text:
