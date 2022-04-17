@@ -20,6 +20,7 @@ cat > lib/profile <<!
 bind -qa $x^home/bin/rc /bin
 bind -qa $x^home/bin/$x^cputype /bin
 font=/lib/font/bit/vga/unicode.font
+fn mothra { /bin/mothra -a $* }
 switch($x^service){
 case terminal
 	webcookies
@@ -29,7 +30,7 @@ case terminal
 	echo -n 'res 3' > '#m/mousectl'
 	prompt=('term% ' '	')
 	fn term%{ $x^* }
-	rio
+	rio -sb -i riostart
 case cpu
 	bind /mnt/term/dev/cons /dev/cons
 	bind -q /mnt/term/dev/consctl /dev/consctl
@@ -46,6 +47,8 @@ case cpu
 	prompt=('cpu% ' '	')
 	fn cpu%{ $x^* }
 	if(! test -e /mnt/term/dev/wsys){
+		prompt=('draw% ' '	')
+		fn draw%{ $x^* }
 		# call from drawterm
 		if(test -e /mnt/term/dev/secstore){
 			auth/factotum -n
@@ -57,11 +60,19 @@ case cpu
 		webcookies
 		webfs
 		plumber
-		rio
+		rio -sb -i riostart
 	}
 case con
 	prompt=('cpu% ' '	')
 }
+!
+cat > bin/rc/riostart <<! 
+#!/bin/rc
+window 0,0,161,61 stats -lm 
+window -miny 130 
+
+# run a system shell on the serial console
+~ $#console 0 || window -scroll console
 !
 cat > lib/plumbing <<!
 # to update: cp /usr/$user/lib/plumbing /mnt/plumb/rules
