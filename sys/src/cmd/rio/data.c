@@ -172,10 +172,61 @@ Cursor *corners[9] = {
 	&bl,	&b,	&br,
 };
 
+enum {
+	Noredraw = 1,
+	Rgbcol = 2,
+	Imagecol = 3,
+};
+
+typedef struct Color Color;
+
+struct Color {
+	char *id;
+	int type;
+	union {
+		u32int rgb;
+		char *path;
+	};
+	int flags;
+};
+
+static Color theme[Numcolors] = {
+	[Colrioback]	= {"rioback", Rgbcol, {0x777777}, 0},
+};
+
+Image *col[Numcolors];
+
+static char *
+readall(int f, int *osz)
+{
+	int bufsz, sz, n;
+	char *s;
+
+	bufsz = 1023;
+	s = nil;
+	for(sz = 0;; sz += n){
+		if(bufsz-sz < 1024){
+			bufsz *= 2;
+			s = realloc(s, bufsz);
+		}
+		if((n = readn(f, s+sz, bufsz-sz-1)) < 1)
+			break;
+	}
+	if(n < 0 || sz < 1){
+		free(s);
+		return nil;
+	}
+	s[sz] = 0;
+	*osz = sz;
+
+	return s;
+}
+
 void
 iconinit(void)
 {
-	background = allocimage(display, Rect(0,0,1,1), screen->chan, 1, 0x777777FF);
+	int i, f, sz;
+	char *s;
 
 	/* greys are multiples of 0x11111100+0xFF, 14* being palest */
 	cols[BACK] = allocimage(display, Rect(0,0,1,1), CMAP8, 1, 0xFFFFFFFF^reverse);
@@ -201,4 +252,97 @@ iconinit(void)
 		holdcol = dholdcol;
 	else
 		holdcol = paleholdcol;
+
+	if((f = open("/dev/theme", OREAD|OCEXEC)) >= 0){
+		if((s = readall(f, &sz)) != nil)
+			themeload(s, sz);
+		free(s);
+		close(f);
+	}
+
+	for (i = 0; i < nelem(col); i++){
+		if(col[i] == nil)
+			col[i] = allocimage(display, Rect(0,0,1,1), RGB24, 1, theme[i].rgb<8|0x777777ff);
+	}
+}
+
+void redraw(void);
+void
+themeload(char *s, int n)
+{
+	int i, fd;
+	char *t, *a[2], *e, *newp;
+	Image *newc, *repl;
+	u32int rgb;
+
+	if((t = malloc(n+1)) == nil)
+		return;
+	memmove(t, s, n);
+	t[n] = 0;
+
+	for(s = t; s != nil && *s; s = e){
+		if((e = strchr(s, '\n')) != nil)
+			*e++ = 0;
+		if(tokenize(s, a, 2) == 2){
+			for(i = 0; i < nelem(theme); i++) {
+				if(strcmp(theme[i].id, a[0]) == 0) {
+					newc = nil;
+					if(a[1][0] == '/'){
+						if((fd = open(a[1], OREAD)) >= 0){
+							if ((newc = readimage(display, fd, 0)) == nil)
+								goto End;
+							close(fd);
+							if ((repl = allocimage(display, Rect(0, 0, Dx(newc->r), Dy(newc->r)), RGB24, 1, 0x000000ff)) == nil)
+								goto End;
+							if (theme[i].type == Imagecol)
+								free(theme[i].path);
+							if ((newp = strdup(a[1])) == nil)
+								goto End;
+							theme[i].type = Imagecol;
+							theme[i].path = newp;
+							draw(repl, repl->r, newc, 0, newc->r.min);
+							freeimage(newc);
+							newc = repl;
+						}
+					}else{
+						rgb = strtoul(a[1], nil, 16);
+						if((newc = allocimage(display, Rect(0, 0, 1, 1), RGB24, 1, rgb<<8 | 0xff)) != nil) {
+							if (theme[i].type == Imagecol)
+								free(theme[i].path);
+							theme[i].type = Rgbcol;
+							theme[i].rgb = rgb;
+						}
+					}
+					if(new != nil){
+						freeimage(col[i]);
+						col[i] = newc;
+					}
+					break;
+				}
+			}
+		}
+	}
+End:
+	free(t);
+	redraw();
+}
+
+char *
+themestring(int *n)
+{
+	char *s, *t, *e;
+	int i;
+
+	if((t = malloc(512)) != nil){
+		s = t;
+		e = s+512;
+		for(i = 0; i < nelem(theme); i++)
+			if (theme[i].type == Rgbcol)
+				s = seprint(s, e, "%s\t%06ux\n", theme[i].id, theme[i].rgb);
+			else if (theme[i].type == Imagecol)
+				s = seprint(s, e, "%s\t%s\n", theme[i].id, theme[i].path);
+		*n = s - t;
+	}
+
+	return t;
 }
