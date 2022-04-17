@@ -1,0 +1,10 @@
+#!/bin/rc
+# dus - disk usage summary for current dir
+# usage: dus
+
+du -s * | sort -nrk 1 | awk '{
+    if ($1 > 1073741824) printf("%7.2f %s\t%s\n", $1/1073741824, "Tb", $2)
+    else if ($1 > 1048576) printf("%7.2f %s\t%s\n", $1/1048576, "Gb", $2)
+    else if ($1 > 1024) printf("%7.2f %s\t%s\n", $1/1024, "Mb", $2)
+    else printf("%7.2f %s\t%s\n", $1, "Kb", $2)
+}'
