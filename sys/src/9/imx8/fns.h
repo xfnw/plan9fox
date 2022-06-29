@@ -80,6 +80,7 @@ extern void meminit(void);
 extern void putasid(Proc*);
 
 extern void* ucalloc(usize);
+extern void* fbmemalloc(usize);
 
 /* clock */
 extern void clockinit(void);
@@ -138,3 +139,23 @@ extern void writeconf(void);
 
 extern int isaconfig(char*, int, ISAConf*);
 extern void links(void);
+
+/* ccm */
+extern void setclkgate(char *name, int on);
+extern void setclkrate(char *name, char *source, int freq);
+extern int getclkrate(char *name);
+
+/* gpc */
+extern void powerup(char *dom);
+
+/* lcd */
+extern void lcdinit(void);
+
+/* iomux */
+extern void iomuxpad(char *pads, char *sel, char *cfg);
+extern uint iomuxgpr(int gpr, uint set, uint mask);
+
+/* gpio */
+#define GPIO_PIN(n, m)	((n)<<5 | (m))
+extern void gpioout(uint pin, int set);
+extern int gpioin(uint pin);
