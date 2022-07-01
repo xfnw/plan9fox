@@ -72,8 +72,8 @@ window 0,0,161,61 stats -lm
 window -miny 130 
 
 # run a system shell on the serial console
-~ $#console 0 || window -scroll console
 !
+echo '~ $#console 0 || window -scroll console' >> bin/rc/riostart
 cat > lib/plumbing <<!
 # to update: cp /usr/$user/lib/plumbing /mnt/plumb/rules
 
