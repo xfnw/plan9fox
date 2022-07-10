@@ -266,11 +266,13 @@ iconinit(void)
 	}
 }
 
+void resized(void);
 void redraw(void);
+
 void
 themeload(char *s, int n)
 {
-	int i, fd;
+	int i, fd, rioback;
 	char *t, *a[2], *e, *newp;
 	Image *newc, *repl;
 	u32int rgb;
@@ -280,6 +282,7 @@ themeload(char *s, int n)
 	memmove(t, s, n);
 	t[n] = 0;
 
+	rioback = 0;
 	for(s = t; s != nil && *s; s = e){
 		if((e = strchr(s, '\n')) != nil)
 			*e++ = 0;
@@ -316,6 +319,7 @@ themeload(char *s, int n)
 					if(new != nil){
 						freeimage(col[i]);
 						col[i] = newc;
+						rioback |= i == Colrioback;
 					}
 					break;
 				}
@@ -324,6 +328,8 @@ themeload(char *s, int n)
 	}
 End:
 	free(t);
+	if(rioback)
+		resized();
 	redraw();
 }
 
