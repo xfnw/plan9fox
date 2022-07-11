@@ -5,4 +5,4 @@ rfork en
 cd /
 if(! test -d .git)
 	bind -ac /dist/plan9front /
-git/pull -u gits://git.9front.org/plan9front/plan9front
+git/pull -u https://git.sr.ht/~xfnw/plan9fox
