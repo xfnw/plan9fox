@@ -10,7 +10,117 @@
 #include "sysreg.h"
 #include "ureg.h"
 
+#include "rebootcode.i"
+
 Conf conf;
+
+#define	MAXCONF 64
+static char *confname[MAXCONF];
+static char *confval[MAXCONF];
+static int nconf;
+
+void
+bootargsinit(void)
+{
+	int i, j, n;
+	char *cp, *line[MAXCONF], *p, *q;
+
+	/*
+	 *  parse configuration args from dos file plan9.ini
+	 */
+	cp = BOOTARGS;	/* where b.com leaves its config */
+	cp[BOOTARGSLEN-1] = 0;
+
+	/*
+	 * Strip out '\r', change '\t' -> ' '.
+	 */
+	p = cp;
+	for(q = cp; *q; q++){
+		if(*q == -1)
+			break;
+		if(*q == '\r')
+			continue;
+		if(*q == '\t')
+			*q = ' ';
+		*p++ = *q;
+	}
+	*p = 0;
+
+	n = getfields(cp, line, MAXCONF, 1, "\n");
+	for(i = 0; i < n; i++){
+		if(*line[i] == '#')
+			continue;
+		cp = strchr(line[i], '=');
+		if(cp == nil)
+			continue;
+		*cp++ = '\0';
+		for(j = 0; j < nconf; j++){
+			if(cistrcmp(confname[j], line[i]) == 0)
+				break;
+		}
+		confname[j] = line[i];
+		confval[j] = cp;
+		if(j == nconf)
+			nconf++;
+	}
+}
+
+char*
+getconf(char *name)
+{
+	int i;
+
+	for(i = 0; i < nconf; i++)
+		if(cistrcmp(confname[i], name) == 0)
+			return confval[i];
+	return nil;
+}
+
+void
+setconfenv(void)
+{
+	int i;
+
+	for(i = 0; i < nconf; i++){
+		if(confname[i][0] != '*')
+			ksetenv(confname[i], confval[i], 0);
+		ksetenv(confname[i], confval[i], 1);
+	}
+}
+
+void
+writeconf(void)
+{
+	char *p, *q;
+	int n;
+
+	p = getconfenv();
+	if(waserror()) {
+		free(p);
+		nexterror();
+	}
+
+	/* convert to name=value\n format */
+	for(q=p; *q; q++) {
+		q += strlen(q);
+		*q = '=';
+		q += strlen(q);
+		*q = '\n';
+	}
+	n = q - p + 1;
+	if(n >= BOOTARGSLEN)
+		error("kernel configuration too large");
+	memmove(BOOTARGS, p, n);
+	memset(BOOTARGS+n, 0, BOOTARGSLEN-n);
+	poperror();
+	free(p);
+}
+
+int
+isaconfig(char *, int, ISAConf *)
+{
+	return 0;
+}
 
 /*
  *  starting place for first process
@@ -29,6 +139,7 @@ init0(void)
 		else
 			ksetenv("service", "terminal", 0);
 		ksetenv("console", "0", 0);
+		setconfenv();
 		poperror();
 	}
 	kproc("alarm", alarmkproc, 0);
@@ -124,7 +235,7 @@ mpinit(void)
 		MACHP(i)->machno = i;
 		cachedwbinvse(MACHP(i), MACHSIZE);
 
-		u.r0 = 0x84000003;
+		u.r0 = 0x84000003;	/* CPU_ON */
 		u.r1 = (sysrd(MPIDR_EL1) & ~0xFF) | i;
 		u.r2 = PADDR(_start);
 		u.r3 = i;
@@ -132,6 +243,12 @@ mpinit(void)
 	}
 	synccycles();
 	spllo();
+}
+
+void
+cpuidprint(void)
+{
+	iprint("cpu%d: %dMHz ARM Cortex A53\n", m->machno, m->cpumhz);
 }
 
 void
@@ -143,6 +260,7 @@ main(void)
 		fpuinit();
 		intrinit();
 		clockinit();
+		cpuidprint();
 		synccycles();
 		timersinit();
 		flushtlb();
@@ -152,6 +270,7 @@ main(void)
 		return;
 	}
 	quotefmtinstall();
+	bootargsinit();
 	meminit();
 	confinit();
 	xinit();
@@ -162,6 +281,7 @@ main(void)
 	fpuinit();
 	intrinit();
 	clockinit();
+	cpuidprint();
 	timersinit();
 	pageinit();
 	procinit0();
@@ -180,35 +300,64 @@ main(void)
 void
 exit(int)
 {
-	Ureg u = { .r0 = 0x84000009 };
+	Ureg u = { .r0 = 0x84000002 };	/* CPU_OFF */
 
 	cpushutdown();
 	splfhi();
 
-	/* system reset */
+	if(m->machno == 0)
+		u.r0 = 0x84000009;	/* SYSTEM RESET */
 	smccall(&u);
 }
 
-int
-isaconfig(char *, int, ISAConf *)
+static void
+rebootjump(void *entry, void *code, ulong size)
 {
-	return 0;
-}
+	void (*f)(void*, void*, ulong);
 
-char*
-getconf(char *)
-{
-	return nil;
+	intrcpushutdown();
+
+	/* redo identity map */
+	mmuidmap((uintptr*)L1);
+
+	/* setup reboot trampoline function */
+	f = (void*)REBOOTADDR;
+	memmove(f, rebootcode, sizeof(rebootcode));
+
+	cachedwbinvse(f, sizeof(rebootcode));
+	cacheiinvse(f, sizeof(rebootcode));
+
+	(*f)(entry, code, size);
+
+	for(;;);
 }
 
 void
-writeconf(void)
+reboot(void*, void *code, ulong size)
 {
-}
+	writeconf();
+	while(m->machno != 0){
+		procwired(up, 0);
+		sched();
+	}
 
-void
-reboot(void *, void *, ulong)
-{
+	cpushutdown();
+	delay(2000);
+
+	splfhi();
+
+	/* turn off buffered serial console */
+	serialoq = nil;
+
+	/* shutdown devices */
+	chandevshutdown();
+
+	/* stop the clock */
+	clockshutdown();
+	intrsoff();
+
+	/* off we go - never to return */
+	rebootjump((void*)(KTZERO-KZERO), code, size);
 }
 
 void
