@@ -36,7 +36,7 @@ plumb start window rc -c '''echo % mail '''$0'; mail '$0
 # audio
 type is text
 data matches '[a-zA-Z¡-￿0-9_\-.,/]+'
-data matches '([a-zA-Z¡-￿0-9_\-.,/]+)\.(mp3|MP3|ogg|OGG|flac|FLAC|wav|WAV|au|AU|mid|MID|mus|MUS|m3u|M3U|pls|PLS)'
+data matches '([a-zA-Z¡-￿0-9_\-.,/]+)\.(mp3|MP3|ogg|OGG|flac|FLAC|wav|WAV|au|AU|mid|MID|mus|MUS|m3u|M3U|pls|PLS|opus|OPUS)'
 arg isfile	$0
 plumb to audio
 plumb start window -scroll play $file
@@ -44,7 +44,7 @@ plumb start window -scroll play $file
 # image files go to page
 type is text
 data matches '[a-zA-Z¡-￿0-9_\-.,/]+'
-data matches '([a-zA-Z¡-￿0-9_\-.,/]+)\.(jpe?g|JPE?G|gif|GIF|tiff?|TIFF?|ppm|PPM|bit|BIT|png|PNG|pgm|PGM|bmp|BMP|yuv|YUV|tga|TGA)'
+data matches '([a-zA-Z¡-￿0-9_\-.,/]+)\.(jpe?g|JPE?G|gif|GIF|tiff?|TIFF?|ppm|PPM|bit|BIT|png|PNG|pgm|PGM|bmp|BMP|yuv|YUV|tga|TGA|webp|WEBP|img|IMG)'
 arg isfile	$0
 plumb to image
 plumb client page -wi
@@ -107,12 +107,12 @@ data matches '([a-zA-Z¡-￿0-9_\-./]+)\(([1-9])\)'
 plumb start rc -c 'man -b '$2' '$1'
 
 # RFC references are looked up in /lib/rfc and passed to editor
-type is text
-data	matches 'RFC ?([0-9]+)'
-arg isfile /lib/rfc/rfc$1
-data set	$file
-plumb to edit
-plumb client window $editor
+type	is	text
+data	matches	'[Rr][Ff][Cc] ?([0-9]+)'
+arg	isfile	/lib/rfc/rfc$1.html
+data	set	file:///$file
+plumb	to	web
+plumb	client	window $browser -a
 
 # start rule for images without known suffixes
 dst is image
