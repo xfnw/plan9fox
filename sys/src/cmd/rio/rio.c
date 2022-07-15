@@ -608,6 +608,8 @@ redraw(void)
 		for(j=0; j<nhidden; j++)
 			if(w == hidden[j])
 				break;
+		memmove(w->cols, &cols[BACK], sizeof(w->cols));
+
 		frinittick(w);
 		incref(w);
 		if(j < nhidden){
