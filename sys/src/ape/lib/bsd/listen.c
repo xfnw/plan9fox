@@ -121,7 +121,7 @@ listen(fd, backlog)
 	int backlog;
 {
 	Rock *r;
-	int n, cfd, port;
+	int n, cfd;
 	char msg[128];
 	struct sockaddr_un *lunix;
 
@@ -139,20 +139,13 @@ listen(fd, backlog)
 			errno = EBADF;
 			return -1;
 		}
-		port = _sock_inport(&r->addr);
-		if(port >= 0) {
-			if(write(cfd, "bind 0", 6) < 0) {
-				errno = EGREG;
-				close(cfd);
-				return -1;
-			}
-			snprintf(msg, sizeof msg, "announce %d", port);
-		}
-		else
-			strcpy(msg, "announce *");
+		strcpy(msg, "announce ");
+		_sock_inaddr2string(r, msg + 9, sizeof msg - 9);
 		n = write(cfd, msg, strlen(msg));
 		if(n < 0){
-			errno = EOPNOTSUPP;	/* Improve error reporting!!! */
+			_syserrno();
+			if(errno == EPLAN9)
+				errno = EOPNOTSUPP;
 			close(cfd);
 			return -1;
 		}

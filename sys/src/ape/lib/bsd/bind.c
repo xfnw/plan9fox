@@ -24,7 +24,7 @@
 int
 bind(int fd, void *a, int alen)
 {
-	int n, len, cfd, port;
+	int n, len, cfd;
 	struct sockaddr *sa;
 	Rock *r;
 	char msg[128];
@@ -55,20 +55,25 @@ bind(int fd, void *a, int alen)
 		errno = EBADF;
 		return -1;
 	}
-	port = _sock_inport(&r->addr);
-	if(port > 0)
-		snprintf(msg, sizeof msg, "bind %d", port);
-	else
-		strcpy(msg, "bind *");
+
+	strcpy(msg, "bind ");
+	_sock_inaddr2string(r, msg + 5, sizeof msg - 5);
+
 	n = write(cfd, msg, strlen(msg));
 	if(n < 0){
-		errno = EOPNOTSUPP;	/* Improve error reporting!!! */
+		_syserrno();
+		if(errno == EPLAN9)
+			errno = EOPNOTSUPP;
 		close(cfd);
 		return -1;
 	}
+
 	close(cfd);
-	if(port <= 0)
+
+	if(_sock_inport(&r->addr) == 0)
 		_sock_ingetaddr(r, &r->addr, 0, "local");
 
 	return 0;
 }
+
+
