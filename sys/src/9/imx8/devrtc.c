@@ -1,30 +1,24 @@
+/*
+ *  NXP PCF8523 real time clock
+ */
+
 #include	"u.h"
 #include	"../port/lib.h"
 #include	"mem.h"
 #include	"dat.h"
 #include	"fns.h"
 #include	"../port/error.h"
-
-/*
- *  real time clock and non-volatile ram
- */
+#include	"../port/i2c.h"
 
 enum {
-	Paddr=		0x70,	/* address port */
-	Pdata=		0x71,	/* data port */
-
-	Seconds=	0x00,
-	Minutes=	0x02,
-	Hours=		0x04, 
-	Mday=		0x07,
+	Seconds=	0x03,
+	Minutes=	0x04,
+	Hours=		0x05, 
+	Mday=		0x06,
+	Wday=		0x07,
 	Month=		0x08,
 	Year=		0x09,
-	Status=		0x0A,
-
-	Nvoff=		128,	/* where usable nvram lives */
-	Nvsize=		256,
-
-	Nbcd=		6,
+	Nbcd=		1+Year-Seconds,
 };
 
 typedef struct Rtc	Rtc;
@@ -34,36 +28,35 @@ struct Rtc
 	int	min;
 	int	hour;
 	int	mday;
+	int	wday;
 	int	mon;
 	int	year;
 };
 
-
 enum{
 	Qdir = 0,
 	Qrtc,
-	Qnvram,
 };
 
 Dirtab rtcdir[]={
 	".",	{Qdir, 0, QTDIR},	0,	0555,
-	"nvram",	{Qnvram, 0},	Nvsize,	0664,
-	"rtc",		{Qrtc, 0},	0,	0664,
+	"rtc",	{Qrtc, 0},		0,	0664,
 };
 
 static ulong rtc2sec(Rtc*);
 static void sec2rtc(ulong, Rtc*);
-
-void
-rtcinit(void)
-{
-	if(ioalloc(Paddr, 2, 0, "rtc/nvr") < 0)
-		panic("rtcinit: ioalloc failed");
-}
+static I2Cdev *i2c;
 
 static Chan*
 rtcattach(char* spec)
 {
+	i2c = i2cdev(i2cbus("i2c3"), 0x68);
+	if(i2c == nil)
+		error(Enonexist);
+
+	i2c->subaddr = 1;
+	i2c->size = 0x14;
+
 	return devattach('r', spec);
 }
 
@@ -88,9 +81,6 @@ rtcopen(Chan* c, int omode)
 		if(strcmp(up->user, eve)!=0 && omode!=OREAD)
 			error(Eperm);
 		break;
-	case Qnvram:
-		if(strcmp(up->user, eve)!=0)
-			error(Eperm);
 	}
 	return devopen(c, omode, rtcdir, nelem(rtcdir), devgen);
 }
@@ -100,43 +90,27 @@ rtcclose(Chan*)
 {
 }
 
-#define GETBCD(o) ((bcdclock[o]&0xf) + 10*(bcdclock[o]>>4))
+#define GETBCD(o) (((bcdclock[o]&0xf)%10) + 10*((bcdclock[o]>>4)%10))
 
 static long	 
 _rtctime(void)
 {
 	uchar bcdclock[Nbcd];
 	Rtc rtc;
-	int i;
 
-	/* don't do the read until the clock is no longer busy */
-	for(i = 0; i < 10000; i++){
-		outb(Paddr, Status);
-		if(inb(Pdata) & 0x80)
-			continue;
-
-		/* read clock values */
-		outb(Paddr, Seconds);	bcdclock[0] = inb(Pdata);
-		outb(Paddr, Minutes);	bcdclock[1] = inb(Pdata);
-		outb(Paddr, Hours);	bcdclock[2] = inb(Pdata);
-		outb(Paddr, Mday);	bcdclock[3] = inb(Pdata);
-		outb(Paddr, Month);	bcdclock[4] = inb(Pdata);
-		outb(Paddr, Year);	bcdclock[5] = inb(Pdata);
-
-		outb(Paddr, Status);
-		if((inb(Pdata) & 0x80) == 0)
-			break;
-	}
+	/* read clock values */
+	i2crecv(i2c, bcdclock, Nbcd, Seconds);
 
 	/*
 	 *  convert from BCD
 	 */
-	rtc.sec = GETBCD(0);
-	rtc.min = GETBCD(1);
-	rtc.hour = GETBCD(2);
-	rtc.mday = GETBCD(3);
-	rtc.mon = GETBCD(4);
-	rtc.year = GETBCD(5);
+	rtc.sec = GETBCD(Seconds-Seconds) % 60;
+	rtc.min = GETBCD(Minutes-Seconds) % 60;
+	rtc.hour = GETBCD(Hours-Seconds) % 24;
+	rtc.mday = GETBCD(Mday-Seconds);
+	rtc.wday = GETBCD(Wday-Seconds) % 7;
+	rtc.mon = GETBCD(Month-Seconds);
+	rtc.year = GETBCD(Year-Seconds) % 100;
 
 	/*
 	 *  the world starts jan 1 1970
@@ -148,15 +122,11 @@ _rtctime(void)
 	return rtc2sec(&rtc);
 }
 
-static Lock nvrtlock;
-
 long
 rtctime(void)
 {
 	int i;
 	long t, ot;
-
-	ilock(&nvrtlock);
 
 	/* loop till we get two reads in a row the same */
 	t = _rtctime();
@@ -168,16 +138,12 @@ rtctime(void)
 	}
 	if(i == 100) print("we are boofheads\n");
 
-	iunlock(&nvrtlock);
-
 	return t;
 }
 
 static long	 
 rtcread(Chan* c, void* buf, long n, vlong off)
 {
-	ulong t;
-	char *a, *start;
 	ulong offset = off;
 
 	if(c->qid.type & QTDIR)
@@ -185,34 +151,7 @@ rtcread(Chan* c, void* buf, long n, vlong off)
 
 	switch((ulong)c->qid.path){
 	case Qrtc:
-		t = rtctime();
-		n = readnum(offset, buf, n, t, 12);
-		return n;
-	case Qnvram:
-		if(n == 0)
-			return 0;
-		if(n > Nvsize)
-			n = Nvsize;
-		a = start = smalloc(n);
-
-		ilock(&nvrtlock);
-		for(t = offset; t < offset + n; t++){
-			if(t >= Nvsize)
-				break;
-			outb(Paddr, Nvoff+t);
-			*a++ = inb(Pdata);
-		}
-		iunlock(&nvrtlock);
-
-		if(waserror()){
-			free(start);
-			nexterror();
-		}
-		memmove(buf, start, t - offset);
-		poperror();
-
-		free(start);
-		return t - offset;
+		return readnum(offset, buf, n, rtctime(), 12);
 	}
 	error(Ebadarg);
 	return 0;
@@ -223,8 +162,6 @@ rtcread(Chan* c, void* buf, long n, vlong off)
 static long	 
 rtcwrite(Chan* c, void* buf, long n, vlong off)
 {
-	int t;
-	char *a, *start;
 	Rtc rtc;
 	ulong secs;
 	char *cp, sbuf[32];
@@ -234,11 +171,9 @@ rtcwrite(Chan* c, void* buf, long n, vlong off)
 	if(offset!=0)
 		error(Ebadarg);
 
+
 	switch((ulong)c->qid.path){
 	case Qrtc:
-		/*
-		 *  read the time
-		 */
 		if(n >= sizeof(sbuf))
 			error(Ebadarg);
 		strncpy(sbuf, buf, n);
@@ -252,50 +187,21 @@ rtcwrite(Chan* c, void* buf, long n, vlong off)
 		 *  convert to bcd
 		 */
 		sec2rtc(secs, &rtc);
-		PUTBCD(rtc.sec, 0);
-		PUTBCD(rtc.min, 1);
-		PUTBCD(rtc.hour, 2);
-		PUTBCD(rtc.mday, 3);
-		PUTBCD(rtc.mon, 4);
-		PUTBCD(rtc.year, 5);
+		
+		PUTBCD(rtc.sec, Seconds-Seconds);
+		PUTBCD(rtc.min, Minutes-Seconds);
+		PUTBCD(rtc.hour, Hours-Seconds);
+		PUTBCD(rtc.mday, Mday-Seconds);
+		PUTBCD(rtc.wday, Wday-Seconds);
+		PUTBCD(rtc.mon, Month-Seconds);
+		PUTBCD(rtc.year, Year-Seconds);
 
 		/*
 		 *  write the clock
 		 */
-		ilock(&nvrtlock);
-		outb(Paddr, Seconds);	outb(Pdata, bcdclock[0]);
-		outb(Paddr, Minutes);	outb(Pdata, bcdclock[1]);
-		outb(Paddr, Hours);	outb(Pdata, bcdclock[2]);
-		outb(Paddr, Mday);	outb(Pdata, bcdclock[3]);
-		outb(Paddr, Month);	outb(Pdata, bcdclock[4]);
-		outb(Paddr, Year);	outb(Pdata, bcdclock[5]);
-		iunlock(&nvrtlock);
+		i2csend(i2c, bcdclock, Nbcd, Seconds);
+
 		return n;
-	case Qnvram:
-		if(n == 0)
-			return 0;
-		if(n > Nvsize)
-			n = Nvsize;
-	
-		start = a = smalloc(n);
-		if(waserror()){
-			free(start);
-			nexterror();
-		}
-		memmove(a, buf, n);
-		poperror();
-
-		ilock(&nvrtlock);
-		for(t = offset; t < offset + n; t++){
-			if(t >= Nvsize)
-				break;
-			outb(Paddr, Nvoff+t);
-			outb(Pdata, *a++);
-		}
-		iunlock(&nvrtlock);
-
-		free(start);
-		return t - offset;
 	}
 	error(Ebadarg);
 	return 0;
@@ -306,7 +212,7 @@ Dev rtcdevtab = {
 	"rtc",
 
 	devreset,
-	rtcinit,
+	devinit,
 	devshutdown,
 	rtcattach,
 	rtcwalk,
@@ -406,6 +312,11 @@ sec2rtc(ulong secs, Rtc *rtc)
 	}
 
 	/*
+	 * 19700101 was thursday
+	 */
+	rtc->wday = (day + 7340036L) % 7;
+
+	/*
 	 * generate hours:minutes:seconds
 	 */
 	rtc->sec = hms % 60;
@@ -435,26 +346,4 @@ sec2rtc(ulong secs, Rtc *rtc)
 	rtc->mon = d;
 
 	return;
-}
-
-uchar
-nvramread(int addr)
-{
-	uchar data;
-
-	ilock(&nvrtlock);
-	outb(Paddr, addr);
-	data = inb(Pdata);
-	iunlock(&nvrtlock);
-
-	return data;
-}
-
-void
-nvramwrite(int addr, uchar data)
-{
-	ilock(&nvrtlock);
-	outb(Paddr, addr);
-	outb(Pdata, data);
-	iunlock(&nvrtlock);
 }
